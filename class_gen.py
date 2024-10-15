@@ -18,6 +18,9 @@ from llama_index.llms.openai import OpenAI
 from llama_index.core.llms import ChatMessage
 import prompts
 import re
+from json_repair import repair_json
+import json_repair
+
 
 gpt_key = os.environ.get('GPT_key')
 os.environ["OPENAI_API_KEY"] = gpt_key
@@ -31,8 +34,21 @@ class TwoAQG:
         self.diagnoses = []
         self.stem_json = {}
         self.final_json = {}
+        self.paper_facts = []
+        self.log_level = 1
+        # Log 0: No logging
+        # Log 1: Log basic information
+        # Log 2: Log detailed information
 
     ### HELPERS ###
+    def print_if_log_1(self, message):
+        if self.log_level >= 1:
+            print(message)
+    
+    def print_if_log_2(self, message):
+        if self.log_level >= 2:
+            print(message)
+
     def setInputPaper(self, input_paper):
         self.input_paper = input_paper
     
@@ -46,7 +62,8 @@ class TwoAQG:
             return resp_json
         except json.JSONDecodeError:
             # If JSON decoding fails, print an error message and the response content
-            print(f'JSONDecodeError!\n\nGot:\n{resp.message.content}\n\nRetrying...')
+            self.print_if_log_1(f'JSONDecodeError!')
+            self.print_if_log_2(f'\n\nGot:\n{resp.message.content}\n\nRetrying...')
             
         # Attempt to find a valid JSON object within the response content using regex
         match = re.search(r'\{.*\}', resp.message.content, re.DOTALL)
@@ -64,12 +81,13 @@ class TwoAQG:
             
         try:
             # Try to parse the corrected response content as JSON
-            resp_json = json.loads(intermediate)
+            resp_json = json_repair.loads(intermediate)
             # Return the parsed JSON object
             return resp_json
         except json.JSONDecodeError:
             # If JSON decoding fails again, we give up
-            print(f'JSONDecodeError Again!\n\nGot:\n{resp.message.content}')
+            self.print_if_log_1(f'JSONDecodeError Again!')
+            self.print_if_log_2(f'\n\nGot:\n{resp.message.content}')
             raise ValueError("No valid JSON object found in the response")
         
     def generateCOT(self, user_prompt):
@@ -91,7 +109,7 @@ class TwoAQG:
             ChatMessage(role="user", content=user_prompt),
         ]
         plan_json = self.getLLMJSON(messages)
-        print("Got the plan right here!")
+        self.print_if_log_1("Got the plan right here!")
 
         ### PART 2: GENERATE THE OUTPUT FOR EACH STEP
         steps_so_far = []
@@ -111,7 +129,7 @@ class TwoAQG:
 
             step_json = self.getLLMJSON(messages)
             step_reasoning.append(step_json)
-            print(f"Completed step {len(steps_so_far)}/{total_steps}")
+            self.print_if_log_1(f"Completed step {len(steps_so_far)}/{total_steps}")
 
         ### PART 3: SYNTHESISE OUTPUT
         messages = [
@@ -132,8 +150,15 @@ class TwoAQG:
         Returns:
             None: This method updates the instance variable `self.diagnoses` with the generated diagnoses.
         """
-        
-        messages = [ChatMessage(role="user", content=prompts.create_qn(self.input_paper, no_dx))]
+        messages = [ChatMessage(role="user", content=prompts.create_dx(self.input_paper))]
+        lst_diagnoses = self.getLLMJSON(messages)['Diagnoses']
+
+        messages = [ChatMessage(role="user", content=prompts.choose_rare_dx(lst_diagnoses))]
+        lst_rare = self.getLLMJSON(messages)['Diagnoses']
+
+        self.print_if_log_2(f"Possible diagnoses: {', '.join(lst_rare)}")
+
+        messages = [ChatMessage(role="user", content=prompts.create_qn(self.input_paper, lst_rare, no_dx))]
         self.diagnoses = self.getLLMJSON(messages)
 
     def generateStem(self, diagnosis):
@@ -148,7 +173,8 @@ class TwoAQG:
         # String the question stem into prose
         messages = [ChatMessage(role="user", content=prompts.create_text(diagnosis))]
         self.stem_json = self.getLLMJSON(messages)
-        print("Question generated")
+        self.print_if_log_1(f"Question generated for the diagnosis: {self.stem_json['Diagnosis']}")
+        self.print_if_log_2(json.dumps(self.stem_json, indent=4))
     
     def generateOptions(self, diagnosis):
         """
@@ -175,6 +201,7 @@ class TwoAQG:
         ]
         
         self.final_json = self.getLLMJSON(messages)
+        self.print_if_log_2(json.dumps(self.final_json, indent=4))
     
     def completeQuestion(self):
         """
@@ -207,7 +234,7 @@ class TwoAQG:
         wrong_option_4 = self.final_json['Option_Wrong_4']
 
         ## We should ensure that answer and correct_option['Name'] are the same
-        assert answer == correct_option['Name']
+        assert answer.lower() == correct_option['Name'].lower()
 
         options = [
             {"option": "a", "content": correct_option},
@@ -223,7 +250,7 @@ class TwoAQG:
         final_question = {
             "Question_Stem": question_stem,
             "Options": {opt["option"]: opt["content"]["Name"] for opt in options},
-            "Correct_Option_Index": options.index(next(opt for opt in options if opt["content"]["Name"] == answer)),
+            "Correct_Option_Index": options.index(next(opt for opt in options if opt["content"]["Name"].lower() == answer.lower())),
             "Explanation": correct_option["Explanation"],
             "Explanation_Other": [
                 f"{wrong_option_1['Name']}: {wrong_option_1['Explanation']}", 
@@ -235,7 +262,7 @@ class TwoAQG:
 
         final_question["Options"] = [opt["content"]["Name"] for opt in options]
 
-        print(json.dumps(final_question, indent=4))
+        self.print_if_log_1(json.dumps(final_question, indent=4))
         return final_question
     
     def generateQuestion(self, no_dx=3):
@@ -256,4 +283,9 @@ class TwoAQG:
             output_dx_lst.append(self.completeQuestion())
 
         return output_dx_lst
+    
+    def generateFacts(self, no_facts=10):
+        resp = self.getLLMJSON([ChatMessage(role="user", content=prompts.get_facts(self.input_paper, no_facts))])
+        self.paper_facts = resp['Facts']
+        return self.paper_facts
 # %%

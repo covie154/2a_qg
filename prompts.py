@@ -15,13 +15,52 @@ class TwoAQG_Prompts:
 
         Please debug the JSON object and provide a corrected version of the JSON object. Ensure that the JSON object is valid and follows the correct structure.'''
 
+    def create_dx(self, input_paper):
+        return f'''Below is a scientific article, enclosed in three backticks (```). \
+        I'm trying to set a single best answer multiple choice question based on a clinical scenario. 
+        Based on this article, name me all conditions/diagnoses described in this article.
+        Please follow the json schema below.
+        It is very critical that you answer only as a JSON object and JSON stringify it as a single string. Don't include any other verbose explanations and don't include the markdown syntax anywhere.
+
+        {{
+            "Diagnoses": [
+                "Diagnosis 1",
+                "Diagnosis 2",
+                "Diagnosis 3",
+                ...]
+        }}
+        
+        ```
+        {input_paper}
+        ```
+        '''
+    
+    def choose_rare_dx(self, input_dx, no_dx=3):
+        return f'''Below is a a list of diagnoses, enclosed in three backticks (```). \
+        Please return the top {no_dx+2} rarest diagnoses from the list with characteristic imaging features.
+        Please return your answer as a list of diagnoses in a JSON object as shown below.
+        It is very critical that you answer only as a JSON object and JSON stringify it as a single string. Don't include any other verbose explanations and don't include the markdown syntax anywhere.
+
+        {{
+            "Diagnoses": [
+                "Diagnosis 1",
+                "Diagnosis 2",
+                "Diagnosis 3",
+                ...]
+        }}
+        ```
+        {input_dx}
+        ```
+        '''
+    
     # Create the basic question skeleton based on the provided article
-    def create_qn(self, input_paper, no_dx=3):
+    def create_qn(self, input_paper, dx_lst, no_dx=3):
         return f'''Below is a scientific article, enclosed in three backticks (```). \
         I'm trying to set a single best answer multiple choice question based on a clinical scenario. \
         Based on this article, name me a diagnosis described in this article, and provide me with the following details for this scenario: \
         <Patient_Age> <Patient_Gender> <Clinical_History> <Imaging_Modality> <Imaging_Findings> <Diagnosis>. \
-        Please return {no_dx} sets of these details for three different diagnoses described in the article.
+        Please return {no_dx} sets of these details for {no_dx} different diagnoses described in the article.
+        Where possible, choose rarer diagnoses that have characteristic imaging features. Consider the following diagnoses: {', '.join(dx_lst)}
         Please return your answer as a list of JSONs each with the following format:
         {{
             "Patient_Age": int,
@@ -99,7 +138,8 @@ class TwoAQG_Prompts:
         I'm trying to set a single best answer multiple choice question based on a clinical scenario. \
         The information given as follows:
         {clinical_scenario}
-        Please give 4 more close but incorrect answers to the question. You don't need to label them with A-D or 1-4. 
+        Please give 4 more close but incorrect answers to the question. You don't need to label them with A-D or 1-4.
+        One should be extremely close to the correct answer, and the other three should be plausible but incorrect. 
         Explain why the given answer is correct and why the other 4 are incorrect.
         Explain your answers using the information given in the article.
         ```
@@ -186,6 +226,26 @@ class TwoAQG_Prompts:
             }},
         }}
         Provide your response strictly as a JSON with the format below. It is very critical that you answer only as a JSON object and JSON stringify it as a single string. Don't include any other verbose explanations and don't include the markdown syntax anywhere.
+        '''
+    
+    def get_facts(self, input_paper, no_facts):
+        return f'''Please provide a list of {no_facts} facts or key points extracted from the article enclosed in three backticks (```). \
+        Ensure that each fact is clear, concise, and directly related to the content of the article. \
+        Format your response as a according to the JSON schema below. 
+        Do not include any irrelevant information or verbose explanations. 
+        It is very critical that you answer only as a JSON object and JSON stringify it as a single string. Don't include any other verbose explanations and don't include the markdown syntax anywhere.
+        
+        {{
+            "Facts": [
+                "Fact 1",
+                "Fact 2",
+                "Fact 3",
+                ...
+            ]
+        }}
+        ```
+        {input_paper}
+        ```
         '''
 
 # Example usage
