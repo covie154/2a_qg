@@ -247,6 +247,42 @@ class TwoAQG_Prompts:
         {input_paper}
         ```
         '''
+    
+    def refine_qn(self, input_paper, input_qn):
+        return f'''Below is a single best answer multiple choice question based on a clinical scenario. \
+        Some context is also given below for reference, enclosed in three backticks (```). \
+        Please make this question more difficult. This may take the form of reducing the number of clues given, or making the question stem more ambiguous. \
+        Nevertheless please ensure that the provided answer is still the best answer.
+        Do not place the answer in the question stem.
+        Return your answer in the same JSON schema as the original question, updating the included explanation as required.
+        Please retain the phrase "What is the most likely diagnosis?" in the question stem.
+
+        {input_qn}
+
+        ```
+        {input_paper}
+        ```
+        '''
+    
+    def refine_qn_cot_1(self, input_paper, input_qn):
+        return f'''Below is a single best answer multiple choice question based on a clinical scenario. \
+        Some context is also given below for reference, enclosed in three backticks (```). \
+        Please make this question more difficult. This may take the form of reducing the number of clues given, or making the question stem more ambiguous. \
+        Nevertheless please ensure that the provided answer is still the best answer.
+        Do not place the answer in the question stem.
+
+        {input_qn}
+
+        ```
+        {input_paper}
+        ```
+        '''
+    
+    def refine_qn_cot_2(self):
+        return f'''Return your final answer in the same JSON schema as the original question, updating the included explanation as required.
+        Please retain the phrase "What is the most likely diagnosis?" in the question stem.
+        Also include the original "Explanation_Other" field. You may copy the original explanation if it is still relevant, \
+        or modify it accordingly.'''
 
 # Example usage
 prompts = TwoAQG_Prompts()

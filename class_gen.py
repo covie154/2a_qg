@@ -57,7 +57,7 @@ class TwoAQG:
         resp = self.llm_json.chat(message_lst)
         try:
             # Try to parse the response content as JSON
-            resp_json = json.loads(resp.message.content)
+            resp_json = json_repair.loads(resp.message.content)
             # Return the parsed JSON object
             return resp_json
         except json.JSONDecodeError:
@@ -109,7 +109,7 @@ class TwoAQG:
             ChatMessage(role="user", content=user_prompt),
         ]
         plan_json = self.getLLMJSON(messages)
-        self.print_if_log_1("Got the plan right here!")
+        self.print_if_log_1("Created the plan")
 
         ### PART 2: GENERATE THE OUTPUT FOR EACH STEP
         steps_so_far = []
@@ -138,6 +138,7 @@ class TwoAQG:
         ]
 
         resp = self.llm_json.chat(messages)
+        self.print_if_log_1("Completed the plan")
 
         return resp.message.content
 
@@ -262,8 +263,50 @@ class TwoAQG:
 
         final_question["Options"] = [opt["content"]["Name"] for opt in options]
 
-        self.print_if_log_1(json.dumps(final_question, indent=4))
+        self.print_if_log_2("Initial question:")
+        self.print_if_log_2(json.dumps(final_question, indent=4))
+        self.print_if_log_2('\n**************************************\n')
         return final_question
+    
+    def refineQuestion(self, input_qn):
+        # Non-COT refining
+        # Deprecated
+        messages = [ChatMessage(role="system", content=prompts.refine_qn(self.input_paper, input_qn))]
+        modified_json = self.getLLMJSON(messages)
+        
+        self.print_if_log_1("Final question:")
+        self.print_if_log_1(json.dumps(modified_json, indent=4))
+        return modified_json
+
+    def refineQuestionCOT(self, input_qn):
+        """
+        Refines a given question using a Chain-of-Thought (COT) approach.
+        Args:
+            input_qn (str): The initial question to be refined.
+        Returns:
+            dict: A JSON object containing the refined question.
+        Workflow:
+            1. Generates a user prompt using the initial question and input paper.
+            2. Obtains a COT response from the language model.
+            3. Constructs a series of chat messages including the user prompt, COT response, and a follow-up prompt.
+            4. Sends the chat messages to the language model to get a refined question in JSON format.
+            5. Logs the final refined question if logging is enabled.
+        """
+
+        user_prompt = prompts.refine_qn_cot_1(self.input_paper, input_qn)
+        llm_resp_cot = self.generateCOT(user_prompt)
+
+        messages = [
+            ChatMessage(role='user', content=user_prompt),
+            ChatMessage(role='assistant', content=llm_resp_cot),
+            ChatMessage(role='user', content=prompts.refine_qn_cot_2())
+        ]
+        
+        mod_json = self.getLLMJSON(messages)
+
+        self.print_if_log_1("Final question:")
+        self.print_if_log_1(json.dumps(mod_json, indent=4))
+        return mod_json
     
     def generateQuestion(self, no_dx=3):
         """
@@ -280,7 +323,9 @@ class TwoAQG:
         for dx in self.diagnoses:
             self.generateStem(dx)
             self.generateOptions(dx)
-            output_dx_lst.append(self.completeQuestion())
+            init_qn = self.completeQuestion()
+            modified_qn = self.refineQuestionCOT(init_qn)
+            output_dx_lst.append(modified_qn)
 
         return output_dx_lst
     
@@ -288,4 +333,5 @@ class TwoAQG:
         resp = self.getLLMJSON([ChatMessage(role="user", content=prompts.get_facts(self.input_paper, no_facts))])
         self.paper_facts = resp['Facts']
         return self.paper_facts
+
 # %%
