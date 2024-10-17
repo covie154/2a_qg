@@ -18,7 +18,12 @@ class TwoAQG_Prompts:
     def create_dx(self, input_paper):
         return f'''Below is a scientific article, enclosed in three backticks (```). \
         I'm trying to set a single best answer multiple choice question based on a clinical scenario. 
-        Based on this article, name me all conditions/diagnoses described in this article.
+        Based on this article, name me all valid conditions/diagnoses described in this article.
+
+        Valid conditions would include all of the following: Demographic information, clinical history and pictures of the diagnosis
+        Do not include a diagnosis if it does not have all of this information above. 
+        For example, if a diagnosis is listed as a differential diagnosis of only has the imaging features and no clinical history, it is not a valid diagnosis.
+
         Please follow the json schema below.
         It is very critical that you answer only as a JSON object and JSON stringify it as a single string. Don't include any other verbose explanations and don't include the markdown syntax anywhere.
 
@@ -283,6 +288,22 @@ class TwoAQG_Prompts:
         Please retain the phrase "What is the most likely diagnosis?" in the question stem.
         Also include the original "Explanation_Other" field. You may copy the original explanation if it is still relevant, \
         or modify it accordingly.'''
+    
+    def get_doi(self, input_paper):
+        return f'''Below is a scientific article, enclosed in three backticks (```). \
+        Please provide the DOI of the article. The doi format is typically in the form of "doi.org/xxxx", \
+        e.g. "doi.org/10.1234/abcd.1234". 
+
+        Please return your answer as a JSON object with the following format:
+        {{
+            "DOI": "doi.org/xxxx"
+        }}
+        It is very critical that you answer only as a JSON object and JSON stringify it as a single string. Don't include any other verbose explanations and don't include the markdown syntax anywhere
+
+        ```
+        {input_paper}
+        ```
+        '''
 
 # Example usage
 prompts = TwoAQG_Prompts()

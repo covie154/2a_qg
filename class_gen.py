@@ -1,16 +1,8 @@
 #%%
-import logging
-import sys
 import os.path
 import os
 import json
 import random
-from llama_index.core import (
-    VectorStoreIndex,
-    SimpleDirectoryReader,
-    StorageContext,
-    load_index_from_storage,
-)
 from llama_index.embeddings.openai import OpenAIEmbedding
 from llama_index.llms.openai import OpenAI
 from llama_index.agent.openai import OpenAIAgent
@@ -20,9 +12,20 @@ import prompts
 import re
 from json_repair import repair_json
 import json_repair
+import time
+from dotenv import load_dotenv
 
+# Load environment variables from .env file if it exists
+load_dotenv()
 
+# Get the GPT_key from environment variables
 gpt_key = os.environ.get('GPT_key')
+
+# If GPT_key is not found in environment variables, raise an error
+if not gpt_key:
+    raise EnvironmentError("GPT_key not found in environment variables or .env file")
+
+# Set the OpenAI API key
 os.environ["OPENAI_API_KEY"] = gpt_key
 prompts = prompts.TwoAQG_Prompts()
 
@@ -141,6 +144,8 @@ class TwoAQG:
         self.print_if_log_1("Completed the plan")
 
         return resp.message.content
+    
+    ############################################################################################################
 
     ### QUESTION GENERATION FUNCTIONS ###
     def generateDx(self, no_dx=3):
@@ -153,6 +158,13 @@ class TwoAQG:
         """
         messages = [ChatMessage(role="user", content=prompts.create_dx(self.input_paper))]
         lst_diagnoses = self.getLLMJSON(messages)['Diagnoses']
+
+        if lst_diagnoses is None:
+            raise ValueError("No relevant diagnoses found in the input paper")
+        
+        if len(lst_diagnoses) < no_dx:
+            no_dx = len(lst_diagnoses)
+            print(f"Will only generate {no_dx} question(s) due to insufficient data")
 
         messages = [ChatMessage(role="user", content=prompts.choose_rare_dx(lst_diagnoses))]
         lst_rare = self.getLLMJSON(messages)['Diagnoses']
@@ -192,6 +204,7 @@ class TwoAQG:
         """
 
         # Use chain-of-thought reasoning to create all the options for each question
+        self.print_if_log_1("Generating options...")
         user_prompt = prompts.cot_prompt_1_user(self.input_paper, diagnosis)
         llm_resp_cot = self.generateCOT(user_prompt)
 
@@ -263,7 +276,7 @@ class TwoAQG:
 
         final_question["Options"] = [opt["content"]["Name"] for opt in options]
 
-        self.print_if_log_2("Initial question:")
+        self.print_if_log_1("Initial question generated")
         self.print_if_log_2(json.dumps(final_question, indent=4))
         self.print_if_log_2('\n**************************************\n')
         return final_question
@@ -274,8 +287,8 @@ class TwoAQG:
         messages = [ChatMessage(role="system", content=prompts.refine_qn(self.input_paper, input_qn))]
         modified_json = self.getLLMJSON(messages)
         
-        self.print_if_log_1("Final question:")
-        self.print_if_log_1(json.dumps(modified_json, indent=4))
+        self.print_if_log_1("Final question generated")
+        self.print_if_log_2(json.dumps(modified_json, indent=4))
         return modified_json
 
     def refineQuestionCOT(self, input_qn):
@@ -321,11 +334,22 @@ class TwoAQG:
         output_dx_lst = []
 
         for dx in self.diagnoses:
+            # Track the start time
+            start_time = time.time()
+
+            # Generate the question
             self.generateStem(dx)
             self.generateOptions(dx)
             init_qn = self.completeQuestion()
             modified_qn = self.refineQuestionCOT(init_qn)
             output_dx_lst.append(modified_qn)
+
+            # Track the end time
+            end_time = time.time()
+            # Calculate the time taken
+            time_taken = end_time - start_time
+            time_taken_min_sec = [int(time_taken // 60), int(time_taken % 60)]
+            self.print_if_log_1(f'Time taken: {time_taken_min_sec[0]} mins {time_taken_min_sec[1]} secs')
 
         return output_dx_lst
     
@@ -333,5 +357,26 @@ class TwoAQG:
         resp = self.getLLMJSON([ChatMessage(role="user", content=prompts.get_facts(self.input_paper, no_facts))])
         self.paper_facts = resp['Facts']
         return self.paper_facts
+    
+    def getDOI(self):
+        resp = self.getLLMJSON([ChatMessage(role="user", content=prompts.get_doi(self.input_paper))])
+        return resp['DOI']
+    
+    def displayPlaintextQuestion(self, question_dict):
+        """
+        Returns a question in plaintext format.
+        Args:
+            question_dict (dict): A dictionary containing the question information.
+        """
+        output = question_dict["Question_Stem"] + '\n'
+        for idx, option in enumerate(question_dict["Options"]):
+            output += f"{chr(65 + idx)}. {option}\n"
+        
+        output += '\n******************************************\n\n'
+        output += f"Correct Option: {chr(65 + question_dict['Correct_Option_Index'])}\n\n"
+        output += f"Explanation:\n{question_dict['Explanation']}\n\n"
+        output += '\n\n'.join(question_dict['Explanation_Other'])
+
+        return output
 
 # %%
