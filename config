@@ -1,0 +1,5 @@
+
+Host aws-ec2
+    HostName ec2-47-129-217-42.ap-southeast-1.compute.amazonaws.com
+    User ec2-user
+    IdentityFile "C:\First Server PEM.pem"
