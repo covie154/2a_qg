@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Question Generation Result</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        h1, h2 {
+            color: #333;
+        }
+        .card {
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 15px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .question {
+            font-weight: bold;
+            font-size: 18px;
+            margin-bottom: 10px;
+        }
+        .answer {
+            margin-bottom: 10px;
+        }
+        .context {
+            background-color: #f8f9fa;
+            padding: 10px;
+            border-left: 3px solid #007bff;
+            margin-top: 15px;
+        }
+        .back-button {
+            display: inline-block;
+            margin-top: 20px;
+            padding: 10px 15px;
+            background-color: #007bff;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+        }
+        .back-button:hover {
+            background-color: #0056b3;
+        }
+    </style>
+</head>
+<body>
+    <h1>Generated Question</h1>
+    
+    <div class="card">
+        <div class="question">{{ result.Question_Stem }}</div>
+        <div class="answers">
+            <ol type="A">
+                {% for option in result.Options %}
+                <li>{{ option }}</li>
+                {% endfor %}
+            </ol>
+
+        <div class="answer">
+          <strong>Answer:</strong>
+          {% if result.Correct_Option_Index == 0 %}
+            A
+          {% elif result.Correct_Option_Index == 1 %}
+            B
+          {% elif result.Correct_Option_Index == 2 %}
+            C
+          {% elif result.Correct_Option_Index == 3 %}
+            D
+          {% elif result.Correct_Option_Index == 4 %}
+            E
+          {% else %}
+            Unknown
+          {% endif %}
+        </div>
+        
+        <div class="explanation">
+            <strong>Explanation:</strong>
+            <p>{{ result.Explanation }}</p>
+            {% for explanation in result.Explanation_Other %}
+                <p>{{ explanation }}</p>
+            {% endfor %}
+
+            <p>Source: <a href="https://{{ result.doi }}">{{ result.doi }}</a></p>
+        </div>
+        
+    </div>
+    
+    <a href="/" class="back-button">Generate Another Question</a>
+</body>
+</html>

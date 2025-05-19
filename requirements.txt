@@ -1,0 +1,14 @@
+# Django and other existing requirements
+Django>=5.1.4
+celery
+redis
+django-celery-results
+celery_progress
+boto3
+django-storages
+
+# Database adapter for PostgreSQL-compatible Aurora
+psycopg2-binary
+
+# Uncomment the following line for MySQL-compatible Aurora instead
+# mysqlclient

@@ -8,8 +8,7 @@ from llama_index.llms.openai import OpenAI
 from llama_index.agent.openai import OpenAIAgent
 from llama_index.llms.openai import OpenAI
 from llama_index.core.llms import ChatMessage
-#import prompts as prompts
-import question_gen.prompts as prompts    # Uncomment if you're using this in django
+import question_gen.prompts as prompts
 import re
 from json_repair import repair_json
 import json_repair
@@ -33,10 +32,8 @@ prompts = prompts.TwoAQG_Prompts()
 class TwoAQG:
     def __init__(self):
         self.input_paper = ""
-        self.llm_json = OpenAI(model="o4-mini", temperature=0, response_format={"type": "json_object"})
-        self.llm = OpenAI(model="o4-mini", temperature=0)
-        self.llm_reasoning = OpenAI(model="o4-mini", temperature=0, additional_kwargs={"reasoning_effort": "high"})
-
+        self.llm_json = OpenAI(model="gpt-4o-mini", temperature=0, response_format={"type": "json_object"})
+        self.llm = OpenAI(model="gpt-4o-mini", temperature=0)
         self.diagnoses = []
         self.stem_json = {}
         self.final_json = {}
@@ -58,25 +55,9 @@ class TwoAQG:
     def setInputPaper(self, input_paper):
         self.input_paper = input_paper
     
-    def getLLMJSON(self, message_lst, response_format, reasoning=False):
+    def getLLMJSON(self, message_lst):
         # Send the list of messages to the LLM and get the response
-        if reasoning:
-            llm_local = self.llm_reasoning
-        else:
-            llm_local = self.llm_json
-            
-        llm_structured = llm_local.as_structured_llm(response_format)
-        
-        try:
-            # Apparently sometimes the response fails to pass to the Pydantic model,
-            # so we need to retry it
-            # Error: AttributeError: 'str' object has no attribute 'model_dump_json'
-            resp = llm_structured.chat(message_lst)
-        except AttributeError as e:
-            self.print_if_log_2(f"AttributeError: {e}. Context: {message_lst}")
-            self.print_if_log_2(f"Retrying...")
-            resp = llm_structured.chat(message_lst)
-        
+        resp = self.llm_json.chat(message_lst)
         try:
             # Try to parse the response content as JSON
             resp_json = json_repair.loads(resp.message.content)
@@ -111,27 +92,58 @@ class TwoAQG:
             self.print_if_log_1(f'JSONDecodeError Again!')
             self.print_if_log_2(f'\n\nGot:\n{resp.message.content}')
             raise ValueError("No valid JSON object found in the response")
-    
-    def levenshtein_distance(self, s1, s2):
-        """Calculate the Levenshtein distance between two strings."""
-        if len(s1) < len(s2):
-            return self.levenshtein_distance(s2, s1)
         
-        # len(s1) >= len(s2)
-        if len(s2) == 0:
-            return len(s1)
-        
-        previous_row = range(len(s2) + 1)
-        for i, c1 in enumerate(s1):
-            current_row = [i + 1]
-            for j, c2 in enumerate(s2):
-                insertions = previous_row[j + 1] + 1
-                deletions = current_row[j] + 1
-                substitutions = previous_row[j] + (c1 != c2)
-                current_row.append(min(insertions, deletions, substitutions))
-            previous_row = current_row
-        
-        return previous_row[-1]
+    def generateCOT(self, user_prompt):
+        """
+        Generates a chain of thought (CoT) based on the provided user prompt.
+        This method follows a three-part process:
+        1. Creates an overall plan based on the user prompt.
+        2. Generates the output for each step in the plan.
+        3. Synthesizes the final output from the steps.
+        Args:
+            user_prompt (str): The prompt provided by the user to generate the CoT.
+        Returns:
+            dict: The final synthesized output in JSON format.
+        """
+
+        ### PART 1: CREATE THE OVERALL PLAN
+        messages = [
+            ChatMessage(role="system", content=prompts.cot_sys_1()),
+            ChatMessage(role="user", content=user_prompt),
+        ]
+        plan_json = self.getLLMJSON(messages)
+        self.print_if_log_1("Created the plan")
+
+        ### PART 2: GENERATE THE OUTPUT FOR EACH STEP
+        steps_so_far = []
+        steps_remaining = plan_json['PLAN']
+        step_reasoning = []
+        total_steps = len(plan_json['PLAN'])
+
+        for step in steps_remaining:
+            cot_sys_2 = prompts.cot_sys_2(steps_so_far, steps_remaining)
+            steps_so_far.append(step)
+            steps_remaining = steps_remaining[1:]
+
+            messages = [
+                ChatMessage(role="system", content=cot_sys_2),
+                ChatMessage(role="user", content=user_prompt),
+            ]
+
+            step_json = self.getLLMJSON(messages)
+            step_reasoning.append(step_json)
+            self.print_if_log_1(f"Completed step {len(steps_so_far)}/{total_steps}")
+
+        ### PART 3: SYNTHESISE OUTPUT
+        messages = [
+            ChatMessage(role="system", content=prompts.cot_sys_3(steps_remaining)),
+            ChatMessage(role="user", content=f'{user_prompt}'),
+        ]
+
+        resp = self.llm_json.chat(messages)
+        self.print_if_log_1("Completed the plan")
+
+        return resp.message.content
     
     ############################################################################################################
 
@@ -157,7 +169,7 @@ class TwoAQG:
             }
         """
         messages = [ChatMessage(role="user", content=prompts.create_dx(input_paper))]
-        lst_diagnoses = self.getLLMJSON(messages, prompts.output_create_dx)['Diagnoses']
+        lst_diagnoses = self.getLLMJSON(messages)['Diagnoses']
 
         if lst_diagnoses is None:
             raise ValueError("No relevant diagnoses found in the input paper")
@@ -167,14 +179,12 @@ class TwoAQG:
             print(f"Will only generate {no_dx} question(s) due to insufficient data")
 
         messages = [ChatMessage(role="user", content=prompts.choose_rare_dx(lst_diagnoses))]
-        lst_rare = self.getLLMJSON(messages, prompts.output_choose_rare_dx)['Diagnoses']
+        lst_rare = self.getLLMJSON(messages)['Diagnoses']
 
         self.print_if_log_2(f"Possible diagnoses: {', '.join(lst_rare)}")
 
         messages = [ChatMessage(role="user", content=prompts.create_qn(input_paper, lst_rare, no_dx))]
-        all_dx = self.getLLMJSON(messages, prompts.output_create_qn)
-        #print(all_dx)
-        return all_dx['Diagnoses']
+        return self.getLLMJSON(messages)
 
     def generateStem(self, stem_json, diagnosis):
         """
@@ -200,7 +210,7 @@ class TwoAQG:
         self.print_if_log_2(json.dumps(stem_json, indent=4))
 
         # Return the JSON object (self.stem_json in the previous version)
-        return self.getLLMJSON(messages, prompts.output_create_text)
+        return self.getLLMJSON(messages)
     
     def generateOptions(self, input_paper, diagnosis):
         """
@@ -243,25 +253,21 @@ class TwoAQG:
 
         # Use chain-of-thought reasoning to create all the options for each question
         self.print_if_log_1("Generating options...")
-        messages = [ChatMessage(role="user", content=prompts.cot_prompt_1_user(input_paper, diagnosis))]
-        llm_resp_cot = self.getLLMJSON(messages, prompts.output_cot_prompt_1_user, reasoning=True)
-        self.print_if_log_2(f"Reasoning response:\n{json.dumps(llm_resp_cot, indent=4)}")
+        user_prompt = prompts.cot_prompt_1_user(input_paper, diagnosis)
+        llm_resp_cot = self.generateCOT(user_prompt)
 
-        return llm_resp_cot
+        messages = [
+            ChatMessage(role='user', content=user_prompt),
+            ChatMessage(role='assistant', content=llm_resp_cot),
+            ChatMessage(role='user', content=prompts.output_format())
+        ]
+        
+        #self.final_json = self.getLLMJSON(messages)
+        self.print_if_log_2(json.dumps(self.final_json, indent=4))
+
+        # Return the JSON object (self.final_json in the previous version)
+        return self.getLLMJSON(messages)
     
-    def compareOptions(self, option_1, option_2):
-        """
-        Compares two options based on their names and explanations.
-        Args:
-            option_1 (dict): The first option to compare.
-            option_2 (dict): The second option to compare.
-        Returns:
-            bool: True if the options are similar, False otherwise.
-        """
-        messages = [ChatMessage(role="user", content=prompts.options_same(option_1, option_2))]
-        resp = self.getLLMJSON(messages, prompts.output_options_same)
-        return resp['Same']
-               
     def completeQuestion(self, stem_json, final_json):
         """
         # STEP 4 #
@@ -294,12 +300,7 @@ class TwoAQG:
         wrong_option_4 = final_json['Option_Wrong_4']
 
         ## We should ensure that answer and correct_option['Name'] are the same
-        if not answer.lower() == correct_option['Name'].lower():
-            if self.levenshtein_distance(answer.lower(), correct_option['Name'].lower()) > 5:
-                if not self.compareOptions(answer.lower(), correct_option['Name'].lower()):
-                    raise ValueError(f"Answer '{answer}' does not match the correct option '{correct_option['Name']}'; \
-                    all options are: {correct_option['Name']}, {wrong_option_1['Name']}, {wrong_option_2['Name']}, \
-                    {wrong_option_3['Name']}, {wrong_option_4['Name']}")
+        assert answer.lower() == correct_option['Name'].lower()
 
         options = [
             {"option": "a", "content": correct_option},
@@ -343,12 +344,44 @@ class TwoAQG:
         return modified_json
 
     def refineQuestionCOT(self, input_paper, input_qn):
-        messages = [ChatMessage(role="system", content=prompts.refine_qn_cot_1(self.input_paper, input_qn))]
-        modified_json = self.getLLMJSON(messages, prompts.output_refine_qn, reasoning=True)
+        """
+        # STEP 5 #
+        Refines a given question using a Chain-of-Thought (COT) approach.
+        Args:
+            input_qn (str): The initial question to be refined.
+        Returns:
+            dict: A JSON object containing the refined question.
+
+            JSON format:
+            {
+                "Question_Stem": "The refined question stem",
+                "Options": ["Option A", "Option B", "Option C", "Option D"],
+                "Correct_Option_Index": 0,
+                "Explanation": "Explanation of the correct option",
+                "Explanation_Other": ["Explanation of option B", "Explanation of option C", "Explanation of option D"]
+            }
+        Workflow:
+            1. Generates a user prompt using the initial question and input paper.
+            2. Obtains a COT response from the language model.
+            3. Constructs a series of chat messages including the user prompt, COT response, and a follow-up prompt.
+            4. Sends the chat messages to the language model to get a refined question in JSON format.
+            5. Logs the final refined question if logging is enabled.
+        """
+
+        user_prompt = prompts.refine_qn_cot_1(input_paper, input_qn)
+        llm_resp_cot = self.generateCOT(user_prompt)
+
+        messages = [
+            ChatMessage(role='user', content=user_prompt),
+            ChatMessage(role='assistant', content=llm_resp_cot),
+            ChatMessage(role='user', content=prompts.refine_qn_cot_2())
+        ]
         
-        self.print_if_log_1("Final question generated")
-        self.print_if_log_2(json.dumps(modified_json, indent=4))
-        return modified_json
+        mod_json = self.getLLMJSON(messages)
+
+        self.print_if_log_1("Final question:")
+        self.print_if_log_1(json.dumps(mod_json, indent=4))
+        return mod_json
     
     def generateQuestion(self, no_dx=3):
         """
@@ -383,12 +416,12 @@ class TwoAQG:
         return output_dx_lst
     
     def generateFacts(self, input_paper, no_facts=10):
-        resp = self.getLLMJSON([ChatMessage(role="user", content=prompts.get_facts(input_paper, no_facts))], prompts.output_get_facts)
+        resp = self.getLLMJSON([ChatMessage(role="user", content=prompts.get_facts(input_paper, no_facts))])
         self.paper_facts = resp['Facts']
         return self.paper_facts
     
     def getDOI(self, input_paper):
-        resp = self.getLLMJSON([ChatMessage(role="user", content=prompts.get_doi(input_paper))], prompts.output_get_doi)
+        resp = self.getLLMJSON([ChatMessage(role="user", content=prompts.get_doi(input_paper))])
         return resp['DOI']
     
     def displayPlaintextQuestion(self, question_dict):
@@ -401,15 +434,8 @@ class TwoAQG:
         for idx, option in enumerate(question_dict["Options"]):
             output += f"{chr(65 + idx)}. {option}\n"
         
-        correct_option_undiff = question_dict["Correct_Option_Index"]
-        if not isinstance(correct_option_undiff, int):
-            try:
-                correct_option_int = int(correct_option_undiff)
-            except Exception as e:
-                raise ValueError(f"Could not convert correct_option_undiff to int: {e}")
-        
         output += '\n******************************************\n\n'
-        output += f"Correct Option: {chr(65 + correct_option_int)}\n\n"
+        output += f"Correct Option: {chr(65 + question_dict['Correct_Option_Index'])}\n\n"
         output += f"Explanation:\n{question_dict['Explanation']}\n\n"
         output += '\n\n'.join(question_dict['Explanation_Other'])
 

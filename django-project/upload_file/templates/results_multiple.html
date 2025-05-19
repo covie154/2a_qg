@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Generated Questions</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        h1, h2 {
+            color: #333;
+        }
+        .card {
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 15px;
+            margin-bottom: 30px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            position: relative;
+        }
+        /* Style for chosen questions */
+        .card.chosen {
+            border: 3px solid #28a745;
+            background-color: rgba(40, 167, 69, 0.05);
+        }
+        .question {
+            font-weight: bold;
+            font-size: 18px;
+            margin-bottom: 10px;
+        }
+        .answer {
+            margin-bottom: 10px;
+        }
+        .context {
+            background-color: #f8f9fa;
+            padding: 10px;
+            border-left: 3px solid #007bff;
+            margin-top: 15px;
+        }
+        .back-button {
+            display: inline-block;
+            margin-top: 20px;
+            padding: 10px 15px;
+            background-color: #007bff;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+        }
+        .back-button:hover {
+            background-color: #0056b3;
+        }
+        .question-number {
+            background-color: #007bff;
+            color: white;
+            display: inline-block;
+            padding: 5px 10px;
+            border-radius: 50%;
+            margin-right: 10px;
+        }
+        .view-single {
+            display: inline-block;
+            margin-top: 10px;
+            padding: 5px 10px;
+            background-color: #28a745;
+            color: white;
+            text-decoration: none;
+            border-radius: 3px;
+            font-size: 0.9em;
+        }
+        .view-single:hover {
+            background-color: #218838;
+        }
+        /* Star button styling */
+        .star-button {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            font-size: 24px;
+            cursor: pointer;
+            color: #ccc;
+            transition: color 0.2s;
+            background: none;
+            border: none;
+            outline: none;
+        }
+        .star-button.chosen {
+            color: gold;
+        }
+        .star-button:hover {
+            transform: scale(1.2);
+        }
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+    </style>
+</head>
+<body>
+    <h1>Generated Questions</h1>
+    
+    {% for result in results %}
+    <div class="card {% if result.chosen %}chosen{% endif %}" data-id="{{ result.id }}">
+        <div class="card-header">
+            <h2><span class="question-number">{{ forloop.counter }}</span> Question</h2>
+            <button class="star-button {% if result.chosen %}chosen{% endif %}" 
+                    data-id="{{ result.id }}">★</button>
+        </div>
+        <div class="question">{{ result.Question_Stem }}</div>
+        <div class="answers">
+            <ol type="A">
+                {% for option in result.Options %}
+                <li>{{ option }}</li>
+                {% endfor %}
+            </ol>
+
+            <div class="answer">
+              <strong>Answer:</strong>
+              {% if result.Correct_Option_Index == 0 %}
+                A
+              {% elif result.Correct_Option_Index == 1 %}
+                B
+              {% elif result.Correct_Option_Index == 2 %}
+                C
+              {% elif result.Correct_Option_Index == 3 %}
+                D
+              {% elif result.Correct_Option_Index == 4 %}
+                E
+              {% else %}
+                Unknown
+              {% endif %}
+            </div>
+            
+            <div class="explanation">
+                <strong>Explanation:</strong>
+                <p>{{ result.Explanation }}</p>
+                {% for explanation in result.Explanation_Other %}
+                    <p>{{ explanation }}</p>
+                {% endfor %}
+
+                <p>Source: <a href="https://{{ result.doi }}">{{ result.doi }}</a></p>
+            </div>
+            
+            <a href="/question/{{ result.id }}" class="view-single">View Individual Question</a>
+        </div>
+    </div>
+    {% endfor %}
+    
+    <a href="/" class="back-button">Generate More Questions</a>
+
+    <!-- JavaScript for toggling chosen status -->
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const starButtons = document.querySelectorAll('.star-button');
+            
+            starButtons.forEach(button => {
+                button.addEventListener('click', function() {
+                    const questionId = this.getAttribute('data-id');
+                    toggleChosen(questionId, this);
+                });
+            });
+            
+            function toggleChosen(questionId, button) {
+                fetch(`/toggle-chosen/${questionId}/`, {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRFToken': getCookie('csrftoken'),
+                        'Content-Type': 'application/json'
+                    }
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        const card = button.closest('.card');
+                        
+                        if (data.chosen) {
+                            card.classList.add('chosen');
+                            button.classList.add('chosen');
+                        } else {
+                            card.classList.remove('chosen');
+                            button.classList.remove('chosen');
+                        }
+                    }
+                })
+                .catch(error => console.error('Error:', error));
+            }
+            
+            // Helper function to get CSRF token
+            function getCookie(name) {
+                let cookieValue = null;
+                if (document.cookie && document.cookie !== '') {
+                    const cookies = document.cookie.split(';');
+                    for (let i = 0; i < cookies.length; i++) {
+                        const cookie = cookies[i].trim();
+                        if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                            cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                            break;
+                        }
+                    }
+                }
+                return cookieValue;
+            }
+        });
+    </script>
+</body>
+</html>

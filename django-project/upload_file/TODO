@@ -1,0 +1,5 @@
+{DONE} Fix the progress bar
+- Update all-tasks page, fix the "view all results" button
+- In the all-tasks page, is a list of cards the best way to display the info?
+- Fix the debug logging
+- LLM fix the questions?
